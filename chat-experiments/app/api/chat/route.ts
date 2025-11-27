@@ -7,9 +7,9 @@ const opper = new Opper({
 const prompts = `User will ask you some question, understand the user intention and answer the question.
 
 Available functions:
-- sum of two numbers (sum) - args: {num1: number, num2: number, ...}
-- difference of two numbers (diff) - args: {num1: number, num2: number, ...}
-- product of two numbers (prod) - args: {num1: number, num2: number, ...}
+- sum of numbers (sum) - args: {num1: number, num2: number, num3: number, ...} - can accept any number of arguments
+- difference of numbers (diff) - args: {num1: number, num2: number, num3: number, ...} - can accept any number of arguments
+- product of numbers (prod) - args: {num1: number, num2: number, num3: number, ...} - can accept any number of arguments
 
 IMPORTANT: Always respond with valid JSON only.
 
@@ -79,9 +79,9 @@ function sum(args: Record<string, number>) {
 }
 
 function diff(args: Record<string, number>) {
-  return Object.values(args).reduce((acc, curr)=> acc - curr, 0);
+  return Object.values(args).reduce((acc, curr, index) => index === 0 ? curr : acc - curr, args.num1);
 }
 
 function prod(args: Record<string, number>) {
-  return Object.values(args).reduce((acc, curr)=> acc * curr, 1);
+  return Object.values(args).reduce((acc, curr) => acc * curr, 1);
 }
