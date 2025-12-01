@@ -1,5 +1,7 @@
 import { Opper } from "opperai";
 import { tools, ToolName } from '@/lib/tools';
+import { StreamChunk, Message } from "@/lib/types"
+
 
 const opper = new Opper({
   httpBearer: process.env.OPPERAI_API_KEY!,
@@ -19,7 +21,13 @@ const systemPrompt = `You are a helpful assistant with access to tools.
 Available tools:
 ${generateToolPrompt()}
 
-When you need to use a tool, respond ONLY with JSON in this format:
+CRITICAL INSTRUCTIONS:
+1. When you need to use a tool, respond with ONLY raw JSON - no markdown, no explanations, no code blocks.
+2. Do NOT say what you will do. Just call the tool immediately.
+3. Do NOT wrap JSON in \`\`\`json blocks. Output raw JSON directly.
+4. After tools are executed, you will see the results and can provide a natural language response.
+
+Tool call format (output EXACTLY this, nothing else):
 {
   "toolCalls": [
     {
@@ -30,7 +38,12 @@ When you need to use a tool, respond ONLY with JSON in this format:
   ]
 }
 
-Otherwise, respond normally with text.`;
+Examples:
+User: "What is 5 + 10?"
+Assistant: {"toolCalls":[{"id":"call_1","name":"sum","input":{"numbers":[5,10]}}]}
+
+User: "Hello!"
+Assistant: Hello! How can I help you today?`;
 
 export async function POST(req: Request) {
   try {
@@ -102,44 +115,61 @@ async function streamWithTools({
   }));
 
   const response = await opper.stream({
-    model: "openai/gpt-4o-mini",
+    model: "openai/gpt-4o",
     name: 'chat-with-tools',
     instructions: systemPrompt,
     input: opperMessages,
   });
 
   let fullText = '';
-  let toolCalls: Array<{ id: string; name: string; input: any }> = [];
+  let toolCalls: Array<{ id: string; name: string; input: unknown }> = [];
+  let isCollectingJson = false;
 
   for await (const event of response.result) {
     if (!event.data.delta) continue;
 
     const delta = event.data.delta;
 
-    if (typeof delta === 'string' && delta.trim().startsWith('{')) {
+    if (typeof delta === 'string') {
       fullText += delta;
-    } else if (typeof delta === 'string') {
-      fullText += delta;
-      const textChunk: StreamChunk = {
-        type: 'text-delta',
-        text: delta,
-      };
-      controller.enqueue(
-        new TextEncoder().encode(`data: ${JSON.stringify(textChunk)}\n\n`)
-      );
+
+      if (!isCollectingJson && fullText.includes('{"toolCalls"')) {
+        isCollectingJson = true;
+        console.log('Started collecting JSON for tool calls');
+      }
+
+      if (!isCollectingJson) {
+        const textChunk: StreamChunk = {
+          type: 'text-delta',
+          text: delta,
+        };
+        controller.enqueue(
+          new TextEncoder().encode(`data: ${JSON.stringify(textChunk)}\n\n`)
+        );
+      }
     }
   }
 
   try {
-    const parsed = JSON.parse(fullText.trim());
+    let cleanedText = fullText.trim();
+
+    const jsonMatch = cleanedText.match(/\{[\s\S]*"toolCalls"[\s\S]*\}/);
+    if (jsonMatch) {
+      cleanedText = jsonMatch[0];
+    }
+
+    const parsed = JSON.parse(cleanedText);
+
     if (parsed.toolCalls && Array.isArray(parsed.toolCalls)) {
       toolCalls = parsed.toolCalls;
     }
   } catch {
+
+
   }
 
   if (toolCalls.length > 0) {
-    const toolResults: Array<{ toolCallId: string; toolName: string; output: any }> = [];
+    const toolResults: Array<{ toolCallId: string; toolName: string; output: unknown }> = [];
 
     for (const toolCall of toolCalls) {
       const toolCallChunk: StreamChunk = {
@@ -158,7 +188,7 @@ async function streamWithTools({
           throw new Error(`Tool ${toolCall.name} not found`);
         }
 
-        const output = await tool.execute(toolCall.input);
+        const output = await tool.execute(toolCall.input as never);
 
         const resultChunk: StreamChunk = {
           type: 'tool-result',

@@ -2,7 +2,7 @@ export type Tool<INPUT, OUTPUT> = {
   description: string;
   inputSchema: {
     type: 'object';
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
     required?: string[];
   };
   execute: (input: INPUT) => Promise<OUTPUT> | OUTPUT;
